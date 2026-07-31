@@ -1,14 +1,14 @@
-const BASE = "https://graph.instagram.com/v25.0";
+const BASE = "https://graph.instagram.com/v26.0";
 const TOKEN_BASE = "https://graph.instagram.com";
 const API_BASE = "https://api.instagram.com";
 
 async function api(path: string, token: string, options?: RequestInit) {
-  const url = `${BASE}${path}`;
+  const sep = path.includes("?") ? "&" : "?";
+  const url = `${BASE}${path}${sep}access_token=${encodeURIComponent(token)}`;
   const res = await fetch(url, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
       ...options?.headers,
     },
   });
@@ -74,7 +74,7 @@ export async function refreshLongLivedToken(token: string) {
 
 export async function getProfile(igUserId: string, token: string) {
   return api(
-    `/${igUserId}?fields=user_id,username,name,profile_picture_url`,
+    `/${igUserId}?fields=id,username,name,profile_picture_url`,
     token
   );
 }
