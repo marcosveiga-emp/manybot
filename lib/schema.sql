@@ -5,11 +5,10 @@
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 CREATE EXTENSION IF NOT EXISTS pg_net;
 
--- Config (single row)
+-- Config (multi-account)
 CREATE TABLE IF NOT EXISTS config (
-  id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  instagram_user_id TEXT PRIMARY KEY,
   access_token TEXT,
-  instagram_user_id TEXT,
   instagram_username TEXT,
   profile_picture_url TEXT,
   token_expires_at TIMESTAMPTZ,
@@ -20,6 +19,7 @@ CREATE TABLE IF NOT EXISTS config (
 -- Automations
 CREATE TABLE IF NOT EXISTS automations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  instagram_user_id TEXT REFERENCES config(instagram_user_id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   active BOOLEAN DEFAULT true,
   triggers TEXT[] DEFAULT '{}',
@@ -38,26 +38,29 @@ CREATE TABLE IF NOT EXISTS automations (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Follow-ups
-CREATE TABLE IF NOT EXISTS followups (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  contact_id TEXT NOT NULL,
-  automation_id UUID REFERENCES automations(id) ON DELETE CASCADE,
-  step INTEGER NOT NULL DEFAULT 1,
-  message TEXT NOT NULL,
-  delay_after_minutes INTEGER DEFAULT 0,
-  sent BOOLEAN DEFAULT false,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
 -- Contacts
 CREATE TABLE IF NOT EXISTS contacts (
-  instagram_id TEXT PRIMARY KEY,
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  instagram_user_id TEXT REFERENCES config(instagram_user_id) ON DELETE CASCADE,
+  instagram_id TEXT NOT NULL,
   username TEXT,
   first_contact_at TIMESTAMPTZ DEFAULT NOW(),
   last_response_at TIMESTAMPTZ,
   last_automation_id UUID REFERENCES automations(id) ON DELETE SET NULL,
   conversation_open_until TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(instagram_user_id, instagram_id)
+);
+
+-- Follow-ups
+CREATE TABLE IF NOT EXISTS followups (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  contact_id UUID REFERENCES contacts(id) ON DELETE CASCADE,
+  automation_id UUID REFERENCES automations(id) ON DELETE CASCADE,
+  step INTEGER NOT NULL DEFAULT 1,
+  message TEXT NOT NULL,
+  delay_after_minutes INTEGER DEFAULT 0,
+  sent BOOLEAN DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -78,6 +81,7 @@ CREATE TABLE IF NOT EXISTS queue (
 -- Events log
 CREATE TABLE IF NOT EXISTS events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  instagram_user_id TEXT REFERENCES config(instagram_user_id) ON DELETE CASCADE,
   event_type TEXT NOT NULL,
   sender_id TEXT,
   sender_username TEXT,
@@ -130,6 +134,3 @@ BEGIN
   END IF;
 END;
 $$;
-
--- Insert default config row
-INSERT INTO config (id) VALUES (1) ON CONFLICT (id) DO NOTHING;

@@ -1,5 +1,8 @@
 import { getSession } from "@/lib/auth";
 import Link from "next/link";
+import { db } from "@/lib/supabase";
+import { cookies } from "next/headers";
+import { AccountSelector } from "@/components/AccountSelector";
 
 export default async function AdminLayout({
   children,
@@ -16,6 +19,9 @@ export default async function AdminLayout({
 
 async function Sidebar() {
   const authed = await getSession();
+  const { data: accounts } = await db.from("config").select("instagram_user_id, instagram_username");
+  const cookieStore = await cookies();
+  const selectedId = cookieStore.get("selected_ig_account")?.value || (accounts && accounts.length > 0 ? accounts[0].instagram_user_id : null);
 
   return (
     <aside className="w-64 min-h-full bg-white border-r border-zinc-200 p-6 flex flex-col gap-6">
@@ -24,6 +30,9 @@ async function Sidebar() {
           Manybot
         </Link>
       </div>
+      
+      <AccountSelector accounts={accounts ?? []} selectedId={selectedId} />
+
       <nav className="flex flex-col gap-1">
         <SidebarLink href="/admin">Dashboard</SidebarLink>
         <SidebarLink href="/admin/automations">Automacoes</SidebarLink>

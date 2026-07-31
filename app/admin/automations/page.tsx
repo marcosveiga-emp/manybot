@@ -2,21 +2,26 @@ import { db } from "@/lib/supabase";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { AutomationsList } from "./list";
+import { cookies } from "next/headers";
 
 export default async function AutomationsPage() {
   const authed = await getSession();
   if (!authed) redirect("/admin/login");
 
-  const { data: automations } = await db
-    .from("automations")
-    .select("*")
-    .order("created_at", { ascending: false });
+  const cookieStore = await cookies();
+  const selectedId = cookieStore.get("selected_ig_account")?.value;
 
-  const { data: config } = await db
-    .from("config")
-    .select("access_token, instagram_user_id")
-    .eq("id", 1)
-    .single();
+  let configQuery = db.from("config").select("access_token, instagram_user_id");
+  if (selectedId) configQuery = configQuery.eq("instagram_user_id", selectedId);
+  
+  // Use maybeSingle to prevent error if no config exists
+  const { data: config } = await configQuery.limit(1).maybeSingle();
+
+  let autoQ = db.from("automations").select("*").order("created_at", { ascending: false });
+  if (config?.instagram_user_id) {
+    autoQ = autoQ.eq("instagram_user_id", config.instagram_user_id);
+  }
+  const { data: automations } = await autoQ;
 
   return (
     <div>

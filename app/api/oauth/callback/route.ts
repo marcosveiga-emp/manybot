@@ -42,16 +42,15 @@ export async function GET(request: Request) {
     }
 
     const { error: dbError } = await db.from("config").upsert({
-      id: 1,
-      access_token: longToken,
       instagram_user_id: igUserId,
+      access_token: longToken,
       instagram_username: username,
       profile_picture_url: profilePic,
       token_expires_at: new Date(
         Date.now() + expiresIn * 1000
       ).toISOString(),
       updated_at: new Date().toISOString(),
-    });
+    }, { onConflict: "instagram_user_id" });
     if (dbError) throw new Error(`DB: ${dbError.message}`);
 
     try {

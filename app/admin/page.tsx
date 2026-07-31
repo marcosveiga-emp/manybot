@@ -2,6 +2,7 @@ import { db } from "@/lib/supabase";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
+import { cookies } from "next/headers";
 
 export default async function AdminDashboard({
   searchParams,
@@ -12,34 +13,34 @@ export default async function AdminDashboard({
   if (!authed) redirect("/admin/login");
   const { error } = await searchParams;
 
-  const { data: config } = await db
-    .from("config")
-    .select("*")
-    .eq("id", 1)
-    .single();
+  const cookieStore = await cookies();
+  const selectedId = cookieStore.get("selected_ig_account")?.value;
 
-  const { count: automationCount } = await db
-    .from("automations")
-    .select("*", { count: "exact", head: true });
+  let configQuery = db.from("config").select("*");
+  if (selectedId) configQuery = configQuery.eq("instagram_user_id", selectedId);
+  const { data: config } = await configQuery.limit(1).maybeSingle();
 
-  const { data: automations } = await db
-    .from("automations")
-    .select("*")
-    .eq("active", true);
+  const igId = config?.instagram_user_id;
 
-  const { count: contactCount } = await db
-    .from("contacts")
-    .select("*", { count: "exact", head: true });
+  let autoQ = db.from("automations").select("*", { count: "exact", head: true });
+  let activeAutoQ = db.from("automations").select("*").eq("active", true);
+  let contactQ = db.from("contacts").select("*", { count: "exact", head: true });
+  let queueQ = db.from("queue").select("*", { count: "exact", head: true }).eq("status", "pending");
+  let eventsQ = db.from("events").select("*", { count: "exact", head: true }).gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
 
-  const { count: queuePending } = await db
-    .from("queue")
-    .select("*", { count: "exact", head: true })
-    .eq("status", "pending");
+  if (igId) {
+    autoQ = autoQ.eq("instagram_user_id", igId);
+    activeAutoQ = activeAutoQ.eq("instagram_user_id", igId);
+    contactQ = contactQ.eq("instagram_user_id", igId);
+    queueQ = queueQ.eq("instagram_user_id", igId);
+    eventsQ = eventsQ.eq("instagram_user_id", igId);
+  }
 
-  const { count: todayEvents } = await db
-    .from("events")
-    .select("*", { count: "exact", head: true })
-    .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+  const { count: automationCount } = await autoQ;
+  const { data: automations } = await activeAutoQ;
+  const { count: contactCount } = await contactQ;
+  const { count: queuePending } = await queueQ;
+  const { count: todayEvents } = await eventsQ;
 
   const connected = !!config?.access_token;
 

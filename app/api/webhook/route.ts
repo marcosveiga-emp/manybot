@@ -50,7 +50,7 @@ export async function POST(request: Request) {
     const messaging = entry.messaging ?? [];
     for (const event of messaging) {
       try {
-        await processMessage(event);
+        await processMessage(event, entry.id);
       } catch (e) {
         console.error("Message processing error:", e);
       }
@@ -83,6 +83,7 @@ async function processComment(value: Record<string, unknown>, igUserId: string) 
   const { data: evt } = await db
     .from("events")
     .insert({
+      instagram_user_id: igUserId,
       event_type: "comment",
       sender_id: senderId,
       sender_username: senderUsername,
@@ -100,22 +101,24 @@ async function processComment(value: Record<string, unknown>, igUserId: string) 
   // Upsert contact
   await db.from("contacts").upsert(
     {
+      instagram_user_id: igUserId,
       instagram_id: senderId,
       username: senderUsername,
       first_contact_at: new Date().toISOString(),
     },
-    { onConflict: "instagram_id" }
+    { onConflict: "instagram_user_id,instagram_id" }
   );
 
   // Fetch active automations
   const { data: automations } = await db
     .from("automations")
     .select("*")
+    .eq("instagram_user_id", igUserId)
     .eq("active", true);
 
   if (!automations?.length) return;
 
-  const config = await getConfig();
+  const config = await getConfig(igUserId);
 
   for (const auto of automations) {
     const triggers = auto.triggers ?? [];
@@ -204,14 +207,14 @@ async function processComment(value: Record<string, unknown>, igUserId: string) 
   // Drain queue immediately for instant delivery
   if (config.access_token) {
     try {
-      await drainQueue(config.access_token);
+      await drainQueue();
     } catch (e) {
       console.error("Drain error:", e);
     }
   }
 }
 
-async function processMessage(event: Record<string, unknown>) {
+async function processMessage(event: Record<string, unknown>, igUserId: string) {
   const sender = (event.sender as Record<string, string>) ?? {};
   const recipient = (event.recipient as Record<string, string>) ?? {};
   const message = (event.message as Record<string, unknown>) ?? {};
@@ -229,6 +232,7 @@ async function processMessage(event: Record<string, unknown>) {
   const { data: evt } = await db
     .from("events")
     .insert({
+      instagram_user_id: igUserId,
       event_type: eventType,
       sender_id: senderId,
       message_text: messageText,
@@ -243,23 +247,25 @@ async function processMessage(event: Record<string, unknown>) {
   // Upsert contact
   await db.from("contacts").upsert(
     {
+      instagram_user_id: igUserId,
       instagram_id: senderId,
       last_response_at: timestamp
         ? new Date(timestamp).toISOString()
         : new Date().toISOString(),
     },
-    { onConflict: "instagram_id" }
+    { onConflict: "instagram_user_id,instagram_id" }
   );
 
   // Fetch active automations
   const { data: automations } = await db
     .from("automations")
     .select("*")
+    .eq("instagram_user_id", igUserId)
     .eq("active", true);
 
   if (!automations?.length) return;
 
-  const config = await getConfig();
+  const config = await getConfig(igUserId);
 
   for (const auto of automations) {
     const triggers = auto.triggers ?? [];
@@ -339,7 +345,7 @@ async function processMessage(event: Record<string, unknown>) {
   // Drain queue immediately
   if (config.access_token) {
     try {
-      await drainQueue(config.access_token);
+      await drainQueue();
     } catch (e) {
       console.error("Drain error:", e);
     }
@@ -361,8 +367,8 @@ function matchKeyword(
   return null;
 }
 
-async function getConfig() {
-  const { data } = await db.from("config").select("*").eq("id", 1).single();
+async function getConfig(igUserId: string) {
+  const { data } = await db.from("config").select("*").eq("instagram_user_id", igUserId).single();
   return (
     data ?? {
       access_token: "",

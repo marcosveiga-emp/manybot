@@ -8,17 +8,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { data: config } = await db
-    .from("config")
-    .select("access_token")
-    .eq("id", 1)
-    .single();
-
-  if (!config?.access_token) {
-    return NextResponse.json({ error: "No token configured" }, { status: 400 });
-  }
-
-  const result = await drainQueue(config.access_token);
+  const result = await drainQueue();
 
   return NextResponse.json(result);
 }
