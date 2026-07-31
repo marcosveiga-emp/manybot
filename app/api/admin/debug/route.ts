@@ -11,11 +11,17 @@ export async function GET() {
 
   let profileTest = null;
   let subscribeTest = null;
+  let profileMe = null;
   if (config?.access_token && config?.instagram_user_id) {
     try {
       profileTest = await getProfile(config.instagram_user_id, config.access_token);
     } catch (e) {
       profileTest = { error: e instanceof Error ? e.message : "failed" };
+    }
+    try {
+      profileMe = await getProfile("me", config.access_token);
+    } catch (e) {
+      profileMe = { error: e instanceof Error ? e.message : "failed" };
     }
     try {
       subscribeTest = await subscribeWebhooks(config.instagram_user_id, config.access_token);
@@ -34,6 +40,7 @@ export async function GET() {
     automations_count: autoCount,
     events_count: events?.length ?? 0,
     profileTest,
+    profileMe,
     subscribeTest,
   });
 }

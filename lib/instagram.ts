@@ -73,8 +73,9 @@ export async function refreshLongLivedToken(token: string) {
 }
 
 export async function getProfile(igUserId: string, token: string) {
+  const id = igUserId === "me" ? "me" : igUserId;
   return api(
-    `/${igUserId}?fields=id,username,name,profile_picture_url`,
+    `/${id}?fields=id,username,name,profile_picture_url`,
     token
   );
 }
