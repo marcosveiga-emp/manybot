@@ -16,7 +16,6 @@ export async function GET(request: Request) {
 
     const short = await exchangeCodeForToken(code);
     const shortToken = short.access_token;
-    const igUserId = short.user_id;
 
     let longToken = shortToken;
     let expiresIn = 5184000;
@@ -30,10 +29,12 @@ export async function GET(request: Request) {
       console.error("Long token exchange failed, using short token:", e);
     }
 
+    let igUserId = short.user_id;
     let username = null;
     let profilePic = null;
     try {
-      const profile = await getProfile(igUserId ?? "me", longToken);
+      const profile = await getProfile("me", longToken);
+      igUserId = profile.id ?? igUserId;
       username = profile.username;
       profilePic = profile.profile_picture_url;
     } catch (e) {
@@ -54,7 +55,7 @@ export async function GET(request: Request) {
     if (dbError) throw new Error(`DB: ${dbError.message}`);
 
     try {
-      await subscribeWebhooks(igUserId ?? "me", longToken);
+      await subscribeWebhooks(igUserId, longToken);
     } catch {
       // subscription may already exist
     }
