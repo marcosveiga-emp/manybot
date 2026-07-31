@@ -1,11 +1,8 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/supabase";
-import { getSession } from "@/lib/auth";
 import { getProfile } from "@/lib/instagram";
 
 export async function GET() {
-  const authed = await getSession();
-  if (!authed) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { data: config } = await db.from("config").select("*").eq("id", 1).single();
 
