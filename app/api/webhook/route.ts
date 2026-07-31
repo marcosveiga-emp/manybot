@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { validateSignature } from "@/lib/crypto";
 import { db } from "@/lib/supabase";
-import { enqueue } from "@/lib/queue";
+import { enqueue, drainQueue } from "@/lib/queue";
 import { replyToComment } from "@/lib/instagram";
 
 export async function GET(request: Request) {
@@ -166,13 +166,14 @@ async function processComment(value: Record<string, unknown>, igUserId: string) 
     }
   }
 
-  // Drain queue immediately
-  after(() => {
-    fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/drain`, {
-      method: "POST",
-      headers: { "x-cron-secret": process.env.CRON_SECRET! },
-    }).catch(() => {});
-  });
+  // Drain queue immediately for instant delivery
+  if (config.access_token) {
+    try {
+      await drainQueue(config.access_token);
+    } catch (e) {
+      console.error("Drain error:", e);
+    }
+  }
 }
 
 async function processMessage(event: Record<string, unknown>) {
@@ -265,12 +266,14 @@ async function processMessage(event: Record<string, unknown>) {
       .eq("instagram_id", senderId);
   }
 
-  after(() => {
-    fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/drain`, {
-      method: "POST",
-      headers: { "x-cron-secret": process.env.CRON_SECRET! },
-    }).catch(() => {});
-  });
+  // Drain queue immediately
+  if (config.access_token) {
+    try {
+      await drainQueue(config.access_token);
+    } catch (e) {
+      console.error("Drain error:", e);
+    }
+  }
 }
 
 function matchKeyword(
@@ -298,12 +301,4 @@ async function getConfig() {
       profile_picture_url: "",
     }
   );
-}
-
-function after(fn: () => void) {
-  if (typeof queueMicrotask === "function") {
-    queueMicrotask(fn);
-  } else {
-    setTimeout(fn, 0);
-  }
 }
