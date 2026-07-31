@@ -1,28 +1,30 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/supabase";
-import { getSession } from "@/lib/auth";
 
 export async function GET() {
-  const authed = await getSession();
-  if (!authed) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const results: Record<string, unknown> = {};
+
+  try {
+    const { data, error } = await db
+      .from("config")
+      .select("id")
+      .eq("id", 1)
+      .single();
+    results.read = error ? `ERROR: ${error.message}` : "OK";
+    results.data = data;
+  } catch (e) {
+    results.read = `EXCEPTION: ${e instanceof Error ? e.message : "unknown"}`;
   }
 
-  const { data, error } = await db
-    .from("config")
-    .select("*")
-    .eq("id", 1)
-    .single();
+  try {
+    const { error } = await db.from("config").upsert({
+      id: 1,
+      updated_at: new Date().toISOString(),
+    });
+    results.write = error ? `ERROR: ${error.message}` : "OK";
+  } catch (e) {
+    results.write = `EXCEPTION: ${e instanceof Error ? e.message : "unknown"}`;
+  }
 
-  return NextResponse.json({
-    config: data
-      ? {
-          instagram_user_id: data.instagram_user_id,
-          instagram_username: data.instagram_username,
-          has_token: !!data.access_token,
-          token_expires_at: data.token_expires_at,
-        }
-      : null,
-    error: error?.message ?? null,
-  });
+  return NextResponse.json(results);
 }
