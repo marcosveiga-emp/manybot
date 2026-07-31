@@ -88,7 +88,7 @@ export default async function AdminDashboard({
           )}
           <div>
             <p className="font-semibold text-green-800">
-              Conectado como @{config.instagram_username}
+              Conectado como @{config.instagram_username || config.instagram_user_id}
             </p>
             <p className="text-sm text-green-600">
               Token expira em{" "}

@@ -31,7 +31,7 @@ export function AccountSelector({
         </option>
         {accounts.map((acc) => (
           <option key={acc.instagram_user_id} value={acc.instagram_user_id}>
-            @{acc.instagram_username}
+            @{acc.instagram_username || acc.instagram_user_id}
           </option>
         ))}
       </select>
