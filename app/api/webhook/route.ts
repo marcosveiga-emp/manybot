@@ -22,18 +22,6 @@ export async function POST(request: Request) {
   const rawBody = await request.text();
   const signature = request.headers.get("x-hub-signature-256") ?? "";
 
-  // TEMP: log all incoming webhook POSTs to events table
-  try {
-    await db.from("events").insert({
-      event_type: "webhook_raw",
-      message_text: `sig=${signature.slice(0, 20)}... body=${rawBody.slice(0, 500)}`,
-      raw_payload: JSON.parse(rawBody),
-      processed: false,
-    });
-  } catch {
-    // ignore logging errors
-  }
-
   if (!validateSignature(rawBody, signature)) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 403 });
   }
@@ -48,13 +36,23 @@ export async function POST(request: Request) {
   const entries = payload?.entry ?? [];
 
   for (const entry of entries) {
-    const messaging = entry.messaging ?? [];
+    // Comments format: entry[].changes[]
+    const changes = entry.changes ?? [];
+    for (const change of changes) {
+      try {
+        await processChange(change, entry.id);
+      } catch (e) {
+        console.error("Change processing error:", e);
+      }
+    }
 
+    // Messages format: entry[].messaging[]
+    const messaging = entry.messaging ?? [];
     for (const event of messaging) {
       try {
-        await processEvent(event);
+        await processMessage(event);
       } catch (e) {
-        console.error("Event processing error:", e);
+        console.error("Message processing error:", e);
       }
     }
   }
@@ -62,27 +60,130 @@ export async function POST(request: Request) {
   return NextResponse.json({ status: "ok" });
 }
 
-async function processEvent(event: Record<string, unknown>) {
+async function processChange(change: Record<string, unknown>, entryId: string) {
+  const field = change.field as string;
+  const value = (change.value as Record<string, unknown>) ?? {};
+
+  if (field === "comments") {
+    await processComment(value, entryId);
+  }
+}
+
+async function processComment(value: Record<string, unknown>, igUserId: string) {
+  const from = (value.from as Record<string, string>) ?? {};
+  const media = (value.media as Record<string, string>) ?? {};
+
+  const senderId = from.id;
+  const senderUsername = from.username;
+  const commentId = value.id as string;
+  const messageText = (value.text as string) ?? "";
+  const mediaId = media.id ?? "";
+
+  // Log event
+  const { data: evt } = await db
+    .from("events")
+    .insert({
+      event_type: "comment",
+      sender_id: senderId,
+      sender_username: senderUsername,
+      media_id: mediaId,
+      comment_id: commentId,
+      message_text: messageText,
+      raw_payload: value,
+      processed: false,
+    })
+    .select()
+    .single();
+
+  if (!evt) return;
+
+  // Upsert contact
+  await db.from("contacts").upsert(
+    {
+      instagram_id: senderId,
+      username: senderUsername,
+      first_contact_at: new Date().toISOString(),
+    },
+    { onConflict: "instagram_id" }
+  );
+
+  // Fetch active automations
+  const { data: automations } = await db
+    .from("automations")
+    .select("*")
+    .eq("active", true);
+
+  if (!automations?.length) return;
+
+  const config = await getConfig();
+
+  for (const auto of automations) {
+    const triggers = auto.triggers ?? [];
+    const keywords = auto.keywords ?? [];
+
+    if (!triggers.includes("comment")) continue;
+    if (!keywords.length) continue;
+
+    const matched = matchKeyword(messageText, keywords, auto.match_type);
+    if (!matched) continue;
+
+    // Check specific post if configured
+    if (auto.specific_post_id && auto.specific_post_id !== mediaId) continue;
+
+    // Update event with match info
+    await db
+      .from("events")
+      .update({
+        matched_keyword: matched,
+        matched_automation_id: auto.id,
+        processed: true,
+      })
+      .eq("id", evt.id);
+
+    // Private reply via comment_id (fura a janela de 24h)
+    await enqueue({
+      instagram_user_id: config.instagram_user_id,
+      recipient_type: "comment_id",
+      recipient_value: commentId,
+      message: { text: auto.welcome_message },
+    });
+
+    // Optional public reply
+    if (auto.public_replies?.length > 0) {
+      const reply =
+        auto.public_replies[
+          Math.floor(Math.random() * auto.public_replies.length)
+        ];
+      try {
+        await replyToComment(commentId, config.access_token, reply);
+      } catch (e) {
+        console.error("Public reply error:", e);
+      }
+    }
+  }
+
+  // Drain queue immediately
+  after(() => {
+    fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/drain`, {
+      method: "POST",
+      headers: { "x-cron-secret": process.env.CRON_SECRET! },
+    }).catch(() => {});
+  });
+}
+
+async function processMessage(event: Record<string, unknown>) {
   const sender = (event.sender as Record<string, string>) ?? {};
   const recipient = (event.recipient as Record<string, string>) ?? {};
   const message = (event.message as Record<string, unknown>) ?? {};
   const timestamp = event.timestamp as string;
 
   const senderId = sender.id;
-  const igUserId = recipient.id;
 
   const messageText = (message.text as string) ?? "";
   const replyTo = message.reply_to as Record<string, unknown> | undefined;
   const isStoryReply = replyTo?.story != null;
-  const commentId = (event.comment_id as string) ?? "";
-  const media = event.media as Record<string, unknown> | undefined;
-  const mediaId = (media?.id as string) ?? "";
 
-  const eventType = commentId
-    ? "comment"
-    : isStoryReply
-      ? "story_reply"
-      : "message";
+  const eventType = isStoryReply ? "story_reply" : "message";
 
   // Log event
   const { data: evt } = await db
@@ -90,9 +191,6 @@ async function processEvent(event: Record<string, unknown>) {
     .insert({
       event_type: eventType,
       sender_id: senderId,
-      sender_username: null,
-      media_id: mediaId,
-      comment_id: commentId,
       message_text: messageText,
       raw_payload: event,
       processed: false,
@@ -127,13 +225,12 @@ async function processEvent(event: Record<string, unknown>) {
     const triggers = auto.triggers ?? [];
     const keywords = auto.keywords ?? [];
 
-    if (!triggers.includes(eventType)) continue;
+    if (!triggers.includes(eventType === "story_reply" ? "story" : "dm")) continue;
     if (!keywords.length) continue;
 
-    const matched = matchKeyword(messageText.toLowerCase(), keywords, auto.match_type);
+    const matched = matchKeyword(messageText, keywords, auto.match_type);
     if (!matched) continue;
 
-    // Update event with match info
     await db
       .from("events")
       .update({
@@ -143,66 +240,27 @@ async function processEvent(event: Record<string, unknown>) {
       })
       .eq("id", evt.id);
 
-    // Handle based on event type
-    if (eventType === "comment" && commentId) {
-      // Private reply (fura a janela de 24h, 1 vez por comentario)
+    if (config.instagram_user_id && senderId) {
       await enqueue({
         instagram_user_id: config.instagram_user_id,
-        recipient_type: "comment_id",
-        recipient_value: commentId,
+        recipient_type: "id",
+        recipient_value: senderId,
         message: { text: auto.welcome_message },
       });
-
-      // Optional public reply (direct call, not queued)
-      if (auto.public_replies?.length > 0) {
-        const reply =
-          auto.public_replies[
-            Math.floor(Math.random() * auto.public_replies.length)
-          ];
-        try {
-          await replyToComment(commentId, config.access_token, reply);
-        } catch (e) {
-          console.error("Public reply error:", e);
-        }
-      }
-
-      if (auto.quick_reply_button) {
-        await enqueue({
-          instagram_user_id: config.instagram_user_id,
-          recipient_type: "comment_id",
-          recipient_value: commentId,
-          message: {
-            text: auto.quick_reply_button,
-            quick_replies: [{ content_type: "text", title: auto.quick_reply_button, payload: "WELCOME_REPLY" }],
-          },
-        });
-      }
-    } else if ((eventType === "message" || eventType === "story_reply") && messageText) {
-      // DM ou story reply - manda welcome direct
-      if (config.instagram_user_id && senderId) {
-        await enqueue({
-          instagram_user_id: config.instagram_user_id,
-          recipient_type: "id",
-          recipient_value: senderId,
-          message: { text: auto.welcome_message },
-        });
-      }
-
-      // Open the 24h window - update contact
-      await db
-        .from("contacts")
-        .update({
-          last_response_at: new Date().toISOString(),
-          conversation_open_until: new Date(
-            Date.now() + 24 * 60 * 60 * 1000
-          ).toISOString(),
-          last_automation_id: auto.id,
-        })
-        .eq("instagram_id", senderId);
     }
+
+    await db
+      .from("contacts")
+      .update({
+        last_response_at: new Date().toISOString(),
+        conversation_open_until: new Date(
+          Date.now() + 24 * 60 * 60 * 1000
+        ).toISOString(),
+        last_automation_id: auto.id,
+      })
+      .eq("instagram_id", senderId);
   }
 
-  // Drain queue immediately for instant delivery
   after(() => {
     fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/drain`, {
       method: "POST",
@@ -216,10 +274,11 @@ function matchKeyword(
   keywords: string[],
   matchType: string
 ): string | null {
+  const textLower = text.toLowerCase();
   for (const kw of keywords) {
     const kwLower = kw.toLowerCase();
-    if (matchType === "exact" && text === kwLower) return kw;
-    if (matchType === "contains" && text.includes(kwLower)) return kw;
+    if (matchType === "exact" && textLower === kwLower) return kw;
+    if (matchType === "contains" && textLower.includes(kwLower)) return kw;
     if (matchType === "any") return kw;
   }
   return null;
