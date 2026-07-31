@@ -21,7 +21,8 @@ export default function AdminLogin() {
     });
 
     if (res.ok) {
-      router.push("/admin");
+      window.location.href = "/admin";
+      return;
     } else {
       const data = await res.json().catch(() => ({}));
       setError(data.error ?? "Senha incorreta");
