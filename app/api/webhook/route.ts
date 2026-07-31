@@ -127,8 +127,12 @@ async function processComment(value: Record<string, unknown>, igUserId: string) 
     const matched = matchKeyword(messageText, keywords, auto.match_type);
     if (!matched) continue;
 
-    // Check specific post if configured
-    if (auto.specific_post_id && auto.specific_post_id !== mediaId) continue;
+    // Check specific post only if it's a valid media ID (numeric)
+    if (
+      auto.specific_post_id &&
+      /^\d+$/.test(auto.specific_post_id) &&
+      auto.specific_post_id !== mediaId
+    ) continue;
 
     // Update event with match info
     await db
