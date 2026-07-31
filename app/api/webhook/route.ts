@@ -22,6 +22,18 @@ export async function POST(request: Request) {
   const rawBody = await request.text();
   const signature = request.headers.get("x-hub-signature-256") ?? "";
 
+  // TEMP: log all incoming webhook POSTs to events table
+  try {
+    await db.from("events").insert({
+      event_type: "webhook_raw",
+      message_text: `sig=${signature.slice(0, 20)}... body=${rawBody.slice(0, 500)}`,
+      raw_payload: JSON.parse(rawBody),
+      processed: false,
+    });
+  } catch {
+    // ignore logging errors
+  }
+
   if (!validateSignature(rawBody, signature)) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 403 });
   }
