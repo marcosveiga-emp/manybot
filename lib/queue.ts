@@ -66,7 +66,8 @@ export async function markFailed(id: string, errorMsg: string) {
     .eq("id", id);
 }
 
-export async function drainQueue(): Promise<{ sent: number; failed: number }> {
+// Token passado diretamente pelo webhook (mais simples e confiável)
+export async function drainQueue(token: string): Promise<{ sent: number; failed: number }> {
   let sent = 0;
   let failed = 0;
   const startTime = Date.now();
@@ -78,17 +79,7 @@ export async function drainQueue(): Promise<{ sent: number; failed: number }> {
     if (!msg) break;
 
     try {
-      const { data: config } = await db
-        .from("config")
-        .select("access_token")
-        .eq("instagram_user_id", msg.instagram_user_id)
-        .single();
-        
-      if (!config?.access_token) {
-        throw new Error("No token for this account");
-      }
-
-      await sendMessage(msg.instagram_user_id, config.access_token, {
+      await sendMessage(msg.instagram_user_id, token, {
         recipient: { [msg.recipient_type]: msg.recipient_value },
         message: msg.message,
       });

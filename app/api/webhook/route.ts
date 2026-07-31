@@ -36,11 +36,13 @@ export async function POST(request: Request) {
   const entries = payload?.entry ?? [];
 
   for (const entry of entries) {
+    const igUserId = entry.id as string;
+
     // Comments format: entry[].changes[]
     const changes = entry.changes ?? [];
     for (const change of changes) {
       try {
-        await processChange(change, entry.id);
+        await processChange(change, igUserId);
       } catch (e) {
         console.error("Change processing error:", e);
       }
@@ -50,7 +52,7 @@ export async function POST(request: Request) {
     const messaging = entry.messaging ?? [];
     for (const event of messaging) {
       try {
-        await processMessage(event, entry.id);
+        await processMessage(event, igUserId);
       } catch (e) {
         console.error("Message processing error:", e);
       }
@@ -60,12 +62,12 @@ export async function POST(request: Request) {
   return NextResponse.json({ status: "ok" });
 }
 
-async function processChange(change: Record<string, unknown>, entryId: string) {
+async function processChange(change: Record<string, unknown>, igUserId: string) {
   const field = change.field as string;
   const value = (change.value as Record<string, unknown>) ?? {};
 
   if (field === "comments") {
-    await processComment(value, entryId);
+    await processComment(value, igUserId);
   }
 }
 
@@ -78,6 +80,13 @@ async function processComment(value: Record<string, unknown>, igUserId: string) 
   const commentId = value.id as string;
   const messageText = (value.text as string) ?? "";
   const mediaId = media.id ?? "";
+
+  // Fetch config for this account
+  const config = await getConfig(igUserId);
+  if (!config.access_token) {
+    console.error("No config found for igUserId:", igUserId);
+    return;
+  }
 
   // Log event
   const { data: evt } = await db
@@ -109,16 +118,17 @@ async function processComment(value: Record<string, unknown>, igUserId: string) 
     { onConflict: "instagram_user_id,instagram_id" }
   );
 
-  // Fetch active automations
+  // Fetch active automations for this account
   const { data: automations } = await db
     .from("automations")
     .select("*")
     .eq("instagram_user_id", igUserId)
     .eq("active", true);
 
-  if (!automations?.length) return;
-
-  const config = await getConfig(igUserId);
+  if (!automations?.length) {
+    console.log("No active automations for account:", igUserId);
+    return;
+  }
 
   for (const auto of automations) {
     const triggers = auto.triggers ?? [];
@@ -147,7 +157,7 @@ async function processComment(value: Record<string, unknown>, igUserId: string) 
       })
       .eq("id", evt.id);
 
-    // Private reply via comment_id (fura a janela de 24h)
+    // Private reply via comment_id
     const msgBody: Record<string, unknown> = { text: auto.welcome_message };
     if (auto.quick_reply_button) {
       msgBody.quick_replies = [
@@ -159,7 +169,7 @@ async function processComment(value: Record<string, unknown>, igUserId: string) 
       ];
     }
     await enqueue({
-      instagram_user_id: config.instagram_user_id,
+      instagram_user_id: igUserId,
       recipient_type: "comment_id",
       recipient_value: commentId,
       message: msgBody,
@@ -178,10 +188,10 @@ async function processComment(value: Record<string, unknown>, igUserId: string) 
       }
     }
 
-    // Send link with button as follow-up if configured
+    // Send link as follow-up if configured
     if (auto.link_url) {
       await enqueue({
-        instagram_user_id: config.instagram_user_id,
+        instagram_user_id: igUserId,
         recipient_type: "comment_id",
         recipient_value: commentId,
         message: {
@@ -205,28 +215,31 @@ async function processComment(value: Record<string, unknown>, igUserId: string) 
   }
 
   // Drain queue immediately for instant delivery
-  if (config.access_token) {
-    try {
-      await drainQueue();
-    } catch (e) {
-      console.error("Drain error:", e);
-    }
+  try {
+    await drainQueue(config.access_token);
+  } catch (e) {
+    console.error("Drain error:", e);
   }
 }
 
 async function processMessage(event: Record<string, unknown>, igUserId: string) {
   const sender = (event.sender as Record<string, string>) ?? {};
-  const recipient = (event.recipient as Record<string, string>) ?? {};
   const message = (event.message as Record<string, unknown>) ?? {};
   const timestamp = event.timestamp as string;
 
   const senderId = sender.id;
-
   const messageText = (message.text as string) ?? "";
   const replyTo = message.reply_to as Record<string, unknown> | undefined;
   const isStoryReply = replyTo?.story != null;
 
   const eventType = isStoryReply ? "story_reply" : "message";
+
+  // Fetch config for this account
+  const config = await getConfig(igUserId);
+  if (!config.access_token) {
+    console.error("No config found for igUserId:", igUserId);
+    return;
+  }
 
   // Log event
   const { data: evt } = await db
@@ -250,22 +263,23 @@ async function processMessage(event: Record<string, unknown>, igUserId: string) 
       instagram_user_id: igUserId,
       instagram_id: senderId,
       last_response_at: timestamp
-        ? new Date(timestamp).toISOString()
+        ? new Date(Number(timestamp)).toISOString()
         : new Date().toISOString(),
     },
     { onConflict: "instagram_user_id,instagram_id" }
   );
 
-  // Fetch active automations
+  // Fetch active automations for this account
   const { data: automations } = await db
     .from("automations")
     .select("*")
     .eq("instagram_user_id", igUserId)
     .eq("active", true);
 
-  if (!automations?.length) return;
-
-  const config = await getConfig(igUserId);
+  if (!automations?.length) {
+    console.log("No active automations for account:", igUserId);
+    return;
+  }
 
   for (const auto of automations) {
     const triggers = auto.triggers ?? [];
@@ -286,7 +300,7 @@ async function processMessage(event: Record<string, unknown>, igUserId: string) 
       })
       .eq("id", evt.id);
 
-    if (config.instagram_user_id && senderId) {
+    if (igUserId && senderId) {
       const msgBody: Record<string, unknown> = { text: auto.welcome_message };
       if (auto.quick_reply_button) {
         msgBody.quick_replies = [
@@ -298,16 +312,15 @@ async function processMessage(event: Record<string, unknown>, igUserId: string) 
         ];
       }
       await enqueue({
-        instagram_user_id: config.instagram_user_id,
+        instagram_user_id: igUserId,
         recipient_type: "id",
         recipient_value: senderId,
         message: msgBody,
       });
 
-      // Send link with button as follow-up if configured
       if (auto.link_url) {
         await enqueue({
-          instagram_user_id: config.instagram_user_id,
+          instagram_user_id: igUserId,
           recipient_type: "id",
           recipient_value: senderId,
           message: {
@@ -339,16 +352,15 @@ async function processMessage(event: Record<string, unknown>, igUserId: string) 
         ).toISOString(),
         last_automation_id: auto.id,
       })
+      .eq("instagram_user_id", igUserId)
       .eq("instagram_id", senderId);
   }
 
   // Drain queue immediately
-  if (config.access_token) {
-    try {
-      await drainQueue();
-    } catch (e) {
-      console.error("Drain error:", e);
-    }
+  try {
+    await drainQueue(config.access_token);
+  } catch (e) {
+    console.error("Drain error:", e);
   }
 }
 
@@ -368,7 +380,11 @@ function matchKeyword(
 }
 
 async function getConfig(igUserId: string) {
-  const { data } = await db.from("config").select("*").eq("instagram_user_id", igUserId).single();
+  const { data } = await db
+    .from("config")
+    .select("*")
+    .eq("instagram_user_id", igUserId)
+    .single();
   return (
     data ?? {
       access_token: "",
