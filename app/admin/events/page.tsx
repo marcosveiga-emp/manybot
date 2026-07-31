@@ -1,16 +1,26 @@
 import { db } from "@/lib/supabase";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
+import { cookies } from "next/headers";
+
+export const dynamic = "force-dynamic";
 
 export default async function EventsPage() {
   const authed = await getSession();
   if (!authed) redirect("/admin/login");
 
-  const { data: events } = await db
+  const cookieStore = await cookies();
+  const selectedId = cookieStore.get("selected_ig_account")?.value;
+
+  let query = db
     .from("events")
     .select("*")
     .order("created_at", { ascending: false })
     .limit(200);
+
+  if (selectedId) query = query.eq("instagram_user_id", selectedId);
+
+  const { data: events } = await query;
 
   return (
     <div>

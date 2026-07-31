@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 
 export function AccountSelector({
   accounts,
@@ -10,6 +10,7 @@ export function AccountSelector({
   selectedId: string | null;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
 
   if (accounts.length === 0) return null;
 
@@ -22,7 +23,8 @@ export function AccountSelector({
         value={selectedId || ""}
         onChange={(e) => {
           document.cookie = `selected_ig_account=${e.target.value}; path=/`;
-          router.refresh();
+          // Force full page reload to clear all server-side cache
+          window.location.href = pathname;
         }}
         className="w-full border border-zinc-300 rounded-lg p-2 text-sm bg-zinc-50 outline-none focus:border-zinc-500"
       >

@@ -1,16 +1,26 @@
 import { db } from "@/lib/supabase";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
+import { cookies } from "next/headers";
+
+export const dynamic = "force-dynamic";
 
 export default async function ContactsPage() {
   const authed = await getSession();
   if (!authed) redirect("/admin/login");
 
-  const { data: contacts } = await db
+  const cookieStore = await cookies();
+  const selectedId = cookieStore.get("selected_ig_account")?.value;
+
+  let query = db
     .from("contacts")
     .select("*")
     .order("first_contact_at", { ascending: false })
     .limit(200);
+
+  if (selectedId) query = query.eq("instagram_user_id", selectedId);
+
+  const { data: contacts } = await query;
 
   return (
     <div>
@@ -37,7 +47,7 @@ export default async function ContactsPage() {
           <tbody>
             {(contacts ?? []).map((c) => (
               <tr
-                key={c.instagram_id}
+                key={c.id}
                 className="border-b border-zinc-100 hover:bg-zinc-50"
               >
                 <td className="px-4 py-3 font-medium">

@@ -4,6 +4,8 @@ import { getSession } from "@/lib/auth";
 import { AutomationsList } from "./list";
 import { cookies } from "next/headers";
 
+export const dynamic = "force-dynamic";
+
 export default async function AutomationsPage() {
   const authed = await getSession();
   if (!authed) redirect("/admin/login");
