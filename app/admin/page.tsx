@@ -3,9 +3,14 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 
-export default async function AdminDashboard() {
+export default async function AdminDashboard({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
   const authed = await getSession();
   if (!authed) redirect("/admin/login");
+  const { error } = await searchParams;
 
   const { data: config } = await db
     .from("config")
@@ -45,6 +50,13 @@ export default async function AdminDashboard() {
         Visao geral do seu Manybot
       </p>
 
+      {error && (
+        <div className="mb-6 p-4 rounded-xl bg-red-50 border border-red-200">
+          <p className="font-semibold text-red-800 mb-1">Erro ao conectar</p>
+          <p className="text-sm text-red-700 break-all">{error}</p>
+        </div>
+      )}
+
       {!connected && (
         <div className="mb-8 p-6 rounded-xl bg-amber-50 border border-amber-200">
           <h2 className="font-semibold text-amber-800 mb-2">
@@ -53,12 +65,14 @@ export default async function AdminDashboard() {
           <p className="text-amber-700 mb-4">
             Conecte sua conta do Instagram para comecar a usar as automacoes.
           </p>
-          <Link
+          <a
             href="/api/oauth"
+            target="_blank"
+            rel="noopener noreferrer"
             className="inline-flex h-10 items-center justify-center rounded-lg bg-purple-600 px-6 text-white font-medium text-sm transition-opacity hover:opacity-90"
           >
             Conectar Instagram
-          </Link>
+          </a>
         </div>
       )}
 

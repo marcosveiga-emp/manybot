@@ -1,12 +1,3 @@
-import { NextResponse } from "next/server";
-import { db } from "@/lib/supabase";
-import {
-  exchangeCodeForToken,
-  getLongLivedToken,
-  getProfile,
-  subscribeWebhooks,
-} from "@/lib/instagram";
-
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
@@ -15,30 +6,21 @@ export async function GET(request: Request) {
   if (error || !code) {
     const desc =
       searchParams.get("error_description") ?? "Autorizacao cancelada.";
-    return NextResponse.redirect(
-      new URL(`/admin?error=${encodeURIComponent(desc)}`, request.url)
-    );
+    return closePopupPage({ error: desc });
   }
 
-  const logs: string[] = [];
-
   try {
-    logs.push("1. Trocando code por token curto...");
+    const { exchangeCodeForToken, getLongLivedToken, getProfile, subscribeWebhooks } =
+      await import("@/lib/instagram");
+    const { db } = await import("@/lib/supabase");
+
     const short = await exchangeCodeForToken(code);
-    logs.push("OK: short token obtido");
-
-    logs.push("2. Trocando por token longo...");
     const long = await getLongLivedToken(short.access_token);
-    logs.push("OK: long token obtido");
-
-    logs.push("3. Buscando perfil...");
     const profile = await getProfile(
       short.user_id ?? long.user_id,
       long.access_token
     );
-    logs.push(`OK: perfil=${profile.username}`);
 
-    logs.push("4. Salvando no banco...");
     const { error: dbError } = await db.from("config").upsert({
       id: 1,
       access_token: long.access_token,
@@ -50,26 +32,28 @@ export async function GET(request: Request) {
       ).toISOString(),
       updated_at: new Date().toISOString(),
     });
+    if (dbError) throw new Error(`DB: ${dbError.message}`);
 
-    if (dbError) {
-      logs.push(`ERRO DB: ${dbError.message}`);
-      throw new Error(`DB: ${dbError.message}`);
-    }
-    logs.push("OK: salvo no banco");
-
-    logs.push("5. Inscrevendo webhooks...");
     try {
       await subscribeWebhooks(profile.user_id ?? profile.id, long.access_token);
-      logs.push("OK: webhooks inscritos");
-    } catch (e) {
-      logs.push(`AVISO: webhook subscription falhou: ${e instanceof Error ? e.message : "erro"}`);
+    } catch {
+      // subscription may already exist
     }
 
-    return NextResponse.redirect(new URL("/admin", request.url));
+    return closePopupPage({ success: true, username: profile.username });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro no login";
-    return NextResponse.redirect(
-      new URL(`/admin?error=${encodeURIComponent(msg)}`, request.url)
-    );
+    return closePopupPage({ error: msg });
   }
+}
+
+function closePopupPage({ error, success, username }: { error?: string; success?: boolean; username?: string }) {
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Manybot OAuth</title>
+<style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#fafafa;color:#18181b}</style>
+<script>window.opener?.postMessage(${JSON.stringify({ type: "oauth", error, success, username })}, "*");window.close();</script>
+</head><body><p>${error ? "Erro: " + error.replace(/[<>]/g, "") : "Conectado! Fechando..."}</p>
+<p style="margin-top:1rem;font-size:.875rem;color:#71717a">Podes fechar esta janela.</p></body></html>`;
+  return new Response(html, {
+    headers: { "Content-Type": "text/html" },
+  });
 }

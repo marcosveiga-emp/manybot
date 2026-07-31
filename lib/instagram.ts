@@ -1,4 +1,5 @@
 const BASE = "https://graph.instagram.com/v25.0";
+const TOKEN_BASE = "https://graph.instagram.com";
 const API_BASE = "https://api.instagram.com";
 
 async function api(path: string, token: string, options?: RequestInit) {
@@ -34,19 +35,23 @@ export async function exchangeCodeForToken(code: string) {
     const body = await res.text();
     throw new Error(`OAuth error ${res.status}: ${body}`);
   }
-  return res.json();
+  const json = await res.json();
+  if (Array.isArray(json.data) && json.data[0]) {
+    return {
+      access_token: json.data[0].access_token,
+      user_id: json.data[0].user_id,
+    };
+  }
+  return json;
 }
 
 export async function getLongLivedToken(shortToken: string) {
-  const res = await fetch(`${BASE}/access_token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "ig_exchange_token",
-      client_secret: process.env.INSTAGRAM_APP_SECRET!,
-      access_token: shortToken,
-    }),
+  const params = new URLSearchParams({
+    grant_type: "ig_exchange_token",
+    client_secret: process.env.INSTAGRAM_APP_SECRET!,
+    access_token: shortToken,
   });
+  const res = await fetch(`${TOKEN_BASE}/access_token?${params}`);
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`Token exchange error ${res.status}: ${body}`);
@@ -55,14 +60,11 @@ export async function getLongLivedToken(shortToken: string) {
 }
 
 export async function refreshLongLivedToken(token: string) {
-  const res = await fetch(`${BASE}/refresh_access_token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "ig_refresh_token",
-      access_token: token,
-    }),
+  const params = new URLSearchParams({
+    grant_type: "ig_refresh_token",
+    access_token: token,
   });
+  const res = await fetch(`${TOKEN_BASE}/refresh_access_token?${params}`);
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`Token refresh error ${res.status}: ${body}`);

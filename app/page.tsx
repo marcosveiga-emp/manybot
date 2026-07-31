@@ -1,6 +1,33 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
 
 export default function Home() {
+  const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    function handler(ev: MessageEvent) {
+      if (ev.data?.type === "oauth") {
+        if (ev.data.success) {
+          setToast(`Conectado como @${ev.data.username}! Redirecionando...`);
+          setTimeout(() => {
+            window.location.href = "/admin";
+          }, 1500);
+        } else if (ev.data.error) {
+          setToast(`Erro: ${ev.data.error}`);
+        }
+      }
+    }
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, []);
+
+  function openOAuth() {
+    setToast(null);
+    window.open("/api/oauth", "manybot_oauth", "width=500,height=700");
+  }
+
   return (
     <div className="flex flex-col flex-1 items-center justify-center px-4">
       <main className="flex flex-col items-center gap-8 max-w-lg text-center">
@@ -10,12 +37,12 @@ export default function Home() {
           Quando alguem comenta a palavra certa, seu link chega na hora.
         </p>
         <div className="flex gap-4">
-          <Link
-            href="/api/oauth"
-            className="inline-flex h-12 items-center justify-center rounded-full bg-gradient-to-r from-purple-600 to-pink-600 px-8 text-white font-medium transition-opacity hover:opacity-90"
+          <button
+            onClick={openOAuth}
+            className="inline-flex h-12 items-center justify-center rounded-full bg-gradient-to-r from-purple-600 to-pink-600 px-8 text-white font-medium transition-opacity hover:opacity-90 cursor-pointer"
           >
             Conectar Instagram
-          </Link>
+          </button>
           <Link
             href="/admin"
             className="inline-flex h-12 items-center justify-center rounded-full border border-zinc-300 px-8 text-zinc-700 font-medium transition-colors hover:bg-zinc-100"
@@ -23,6 +50,11 @@ export default function Home() {
             Acessar Painel
           </Link>
         </div>
+        {toast && (
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 px-5 py-3 rounded-xl shadow-lg text-sm font-medium bg-white border border-zinc-200 z-50">
+            {toast}
+          </div>
+        )}
         <div className="flex gap-6 mt-4 text-sm text-zinc-400">
           <Link href="/privacidade" className="hover:text-zinc-600">
             Politica de Privacidade
