@@ -20,34 +20,49 @@ export async function GET(request: Request) {
     );
   }
 
+  const logs: string[] = [];
+
   try {
+    logs.push("1. Trocando code por token curto...");
     const short = await exchangeCodeForToken(code);
+    logs.push("OK: short token obtido");
 
+    logs.push("2. Trocando por token longo...");
     const long = await getLongLivedToken(short.access_token);
-    const token = long.access_token;
-    const expiresIn = long.expires_in ?? 5184000; // 60 days
+    logs.push("OK: long token obtido");
 
-    const profile = await getProfile(short.user_id ?? long.user_id, token);
+    logs.push("3. Buscando perfil...");
+    const profile = await getProfile(
+      short.user_id ?? long.user_id,
+      long.access_token
+    );
+    logs.push(`OK: perfil=${profile.username}`);
 
-    await db.from("config").upsert({
+    logs.push("4. Salvando no banco...");
+    const { error: dbError } = await db.from("config").upsert({
       id: 1,
-      access_token: token,
+      access_token: long.access_token,
       instagram_user_id: profile.user_id ?? profile.id,
       instagram_username: profile.username,
       profile_picture_url: profile.profile_picture_url,
       token_expires_at: new Date(
-        Date.now() + expiresIn * 1000
+        Date.now() + (long.expires_in ?? 5184000) * 1000
       ).toISOString(),
       updated_at: new Date().toISOString(),
     });
 
+    if (dbError) {
+      logs.push(`ERRO DB: ${dbError.message}`);
+      throw new Error(`DB: ${dbError.message}`);
+    }
+    logs.push("OK: salvo no banco");
+
+    logs.push("5. Inscrevendo webhooks...");
     try {
-      await subscribeWebhooks(
-        profile.user_id ?? profile.id,
-        token
-      );
-    } catch {
-      // Webhook subscription may fail if already subscribed
+      await subscribeWebhooks(profile.user_id ?? profile.id, long.access_token);
+      logs.push("OK: webhooks inscritos");
+    } catch (e) {
+      logs.push(`AVISO: webhook subscription falhou: ${e instanceof Error ? e.message : "erro"}`);
     }
 
     return NextResponse.redirect(new URL("/admin", request.url));
