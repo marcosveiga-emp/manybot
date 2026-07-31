@@ -38,12 +38,15 @@ export async function exchangeCodeForToken(code: string) {
 }
 
 export async function getLongLivedToken(shortToken: string) {
-  const params = new URLSearchParams({
-    grant_type: "ig_exchange_token",
-    client_secret: process.env.INSTAGRAM_APP_SECRET!,
-    access_token: shortToken,
+  const res = await fetch(`${BASE}/access_token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "ig_exchange_token",
+      client_secret: process.env.INSTAGRAM_APP_SECRET!,
+      access_token: shortToken,
+    }),
   });
-  const res = await fetch(`${BASE}/access_token?${params}`);
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`Token exchange error ${res.status}: ${body}`);
@@ -52,11 +55,14 @@ export async function getLongLivedToken(shortToken: string) {
 }
 
 export async function refreshLongLivedToken(token: string) {
-  const params = new URLSearchParams({
-    grant_type: "ig_refresh_token",
-    access_token: token,
+  const res = await fetch(`${BASE}/refresh_access_token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "ig_refresh_token",
+      access_token: token,
+    }),
   });
-  const res = await fetch(`${BASE}/refresh_access_token?${params}`);
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`Token refresh error ${res.status}: ${body}`);
