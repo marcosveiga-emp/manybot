@@ -145,11 +145,21 @@ async function processComment(value: Record<string, unknown>, igUserId: string) 
       .eq("id", evt.id);
 
     // Private reply via comment_id (fura a janela de 24h)
+    const msgBody: Record<string, unknown> = { text: auto.welcome_message };
+    if (auto.quick_reply_button) {
+      msgBody.quick_replies = [
+        {
+          content_type: "text",
+          title: auto.quick_reply_button,
+          payload: "WELCOME_REPLY",
+        },
+      ];
+    }
     await enqueue({
       instagram_user_id: config.instagram_user_id,
       recipient_type: "comment_id",
       recipient_value: commentId,
-      message: { text: auto.welcome_message },
+      message: msgBody,
     });
 
     // Optional public reply
@@ -163,6 +173,31 @@ async function processComment(value: Record<string, unknown>, igUserId: string) 
       } catch (e) {
         console.error("Public reply error:", e);
       }
+    }
+
+    // Send link with button as follow-up if configured
+    if (auto.link_url) {
+      await enqueue({
+        instagram_user_id: config.instagram_user_id,
+        recipient_type: "comment_id",
+        recipient_value: commentId,
+        message: {
+          attachment: {
+            type: "template",
+            payload: {
+              template_type: "button",
+              text: auto.link_text || "Aqui esta o link:",
+              buttons: [
+                {
+                  type: "web_url",
+                  title: auto.link_button_label || "Acessar",
+                  url: auto.link_url,
+                },
+              ],
+            },
+          },
+        },
+      });
     }
   }
 
@@ -246,12 +281,47 @@ async function processMessage(event: Record<string, unknown>) {
       .eq("id", evt.id);
 
     if (config.instagram_user_id && senderId) {
+      const msgBody: Record<string, unknown> = { text: auto.welcome_message };
+      if (auto.quick_reply_button) {
+        msgBody.quick_replies = [
+          {
+            content_type: "text",
+            title: auto.quick_reply_button,
+            payload: "WELCOME_REPLY",
+          },
+        ];
+      }
       await enqueue({
         instagram_user_id: config.instagram_user_id,
         recipient_type: "id",
         recipient_value: senderId,
-        message: { text: auto.welcome_message },
+        message: msgBody,
       });
+
+      // Send link with button as follow-up if configured
+      if (auto.link_url) {
+        await enqueue({
+          instagram_user_id: config.instagram_user_id,
+          recipient_type: "id",
+          recipient_value: senderId,
+          message: {
+            attachment: {
+              type: "template",
+              payload: {
+                template_type: "button",
+                text: auto.link_text || "Aqui esta o link:",
+                buttons: [
+                  {
+                    type: "web_url",
+                    title: auto.link_button_label || "Acessar",
+                    url: auto.link_url,
+                  },
+                ],
+              },
+            },
+          },
+        });
+      }
     }
 
     await db
