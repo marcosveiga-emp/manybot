@@ -16,6 +16,7 @@ export async function GET(request: Request) {
 
     const short = await exchangeCodeForToken(code);
     const shortToken = short.access_token;
+    const igUserId = short.user_id;
 
     let longToken = shortToken;
     let expiresIn = 5184000;
@@ -29,17 +30,22 @@ export async function GET(request: Request) {
       console.error("Long token exchange failed, using short token:", e);
     }
 
-    const profile = await getProfile(
-      short.user_id ?? "me",
-      longToken
-    );
+    let username = null;
+    let profilePic = null;
+    try {
+      const profile = await getProfile(igUserId ?? "me", longToken);
+      username = profile.username;
+      profilePic = profile.profile_picture_url;
+    } catch (e) {
+      console.error("Profile fetch failed:", e);
+    }
 
     const { error: dbError } = await db.from("config").upsert({
       id: 1,
       access_token: longToken,
-      instagram_user_id: profile.user_id ?? profile.id,
-      instagram_username: profile.username,
-      profile_picture_url: profile.profile_picture_url,
+      instagram_user_id: igUserId,
+      instagram_username: username,
+      profile_picture_url: profilePic,
       token_expires_at: new Date(
         Date.now() + expiresIn * 1000
       ).toISOString(),
@@ -48,12 +54,12 @@ export async function GET(request: Request) {
     if (dbError) throw new Error(`DB: ${dbError.message}`);
 
     try {
-      await subscribeWebhooks(profile.user_id ?? profile.id, longToken);
+      await subscribeWebhooks(igUserId ?? "me", longToken);
     } catch {
       // subscription may already exist
     }
 
-    return closePopupPage({ success: true, username: profile.username });
+    return closePopupPage({ success: true, username: username ?? "conectado" });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro no login";
     return closePopupPage({ error: msg });
