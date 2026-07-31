@@ -38,6 +38,7 @@ export async function GET() {
       token_expires_at: config.token_expires_at,
     } : null,
     automations_count: autoCount,
+    events: events ?? [],
     events_count: events?.length ?? 0,
     profileTest,
     profileMe,
